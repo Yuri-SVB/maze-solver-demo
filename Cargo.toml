@@ -1,0 +1,8 @@
+[package]
+name = "maze-solver"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Shortest paths in lattice mazes via boolean adjacency-matrix powers"
+
+[dependencies]
