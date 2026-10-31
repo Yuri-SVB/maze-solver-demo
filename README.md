@@ -65,19 +65,24 @@ There are two searches, chosen with `Method` (`--method` in the CLI).
 
 ### Linear
 
-1. Compute `A^0 = I, A^1, A^2, ...` and keep each one.
-   - The first `d` with `A^d[a][b]` set is the shortest distance.
-   - If `A^d == A^(d-1)` while `[a][b]` is still unset, the power is
-     idempotent and `b` is unreachable. This happens within `n` steps.
-2. Walk backwards from `b`. At step `s`, the predecessor of the current tile
-   is any `v` with `A[v][current]` and `A^s[a][v]` set. Because the current
-   tile is exactly `s + 1` steps from `a`, `v` is exactly `s` steps away, so
-   the result is a shortest path. The self-loop never gets picked: the
-   current tile isn't within `s` steps.
+Row `a` of `A^s` is the set of tiles within `s` steps of `a`. That row is
+all the walk back reads, and the next row follows from it alone:
+`row_a(A^(s+1)) = row_a(A^s) * A`. So the linear search never forms a full
+power. It keeps one row of `n` entries per step.
 
-The product skips the left operand's false entries, and the linear search
-multiplies the sparse `A` on the left (`A * A^(d-1)`, which equals
-`A^(d-1) * A` because both are powers of `A`).
+1. Compute `row_a(A^0) = e_a, row_a(A^1), row_a(A^2), ...` and keep each.
+   - The first `d` whose row has `b` set is the shortest distance.
+   - If a row equals the previous one while `b` is still unset, every later
+     row is the same, so `b` is unreachable. This happens within `n` steps.
+2. Walk backwards from `b`. At step `s`, the predecessor of the current tile
+   is any `v` with `A[v][current]` set and `v` in row `s`. Because the
+   current tile is exactly `s + 1` steps from `a`, `v` is exactly `s` steps
+   away, so the result is a shortest path. The self-loop never gets picked:
+   the current tile isn't in row `s`.
+
+Each step is a row-vector product, which ORs together the rows of `A` for
+the tiles reached so far. In effect this is breadth-first search written
+as linear algebra.
 
 ## Limits
 
@@ -85,13 +90,13 @@ The matrices are `n x n` with `n = width * height`. Measured in a release
 build, on a serpentine maze whose only path visits every tile (the worst
 case for path length):
 
-| maze  | path  | linear          | squaring        |
-|-------|-------|-----------------|-----------------|
-| 20x20 | 399   | 266 ms, ~71 MB  | 7 ms, ~4 MB     |
-| 40x40 | 1599  | ~4 GB, over cap | 0.33 s          |
-| 50x50 | 2499  |                 | 1.7 s           |
+| maze  | path | linear (row a only) | squaring |
+|-------|------|---------------------|----------|
+| 20x20 | 399  | 1.5 ms              | 7.7 ms   |
+| 40x40 | 1599 | 66 ms               | 0.38 s   |
+| 50x50 | 2499 | 0.29 s              | 1.7 s    |
 
-Linear stores one matrix per step, so the CLI caps it at 400 tiles.
-Squaring stores one per doubling, about `log2(d)` matrices, so the CLI
-allows 1600. Linear only ever reads row `a` of each stored power, so
-storing just that row would cut its memory by a factor of `n`.
+On random 20x20 mazes linear takes 30-190 µs and squaring 1-6 ms. Linear
+stores `d` rows (`d * n` bools, ~6 MB at 50x50). Squaring stores about
+`log2(d)` full matrices and does dense `n^3` products. The CLI allows
+2500 tiles for linear and 1600 for squaring.

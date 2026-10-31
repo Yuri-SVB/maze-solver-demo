@@ -15,11 +15,11 @@ usage: maze-solver [--width W] [--height H] [--density P] [--seed S] [--method M
   --density P   chance each wall between neighbours is open, 0..1 (default 0.6)
   --seed S      random seed, to reproduce a maze (default: from the clock)
   --method M    squaring (default): A, A^2, A^4, ... then bisection
-                linear: A^0, A^1, A^2, ... one power at a time
+                linear: A^0, A^1, A^2, ... one power at a time, row a only
 
-Matrices are n x n with n = W * H. Linear keeps one per step of the path,
-so it allows W * H <= 400; squaring keeps one per doubling, so it allows
-W * H <= 1600.";
+n = W * H. Squaring multiplies whole n x n matrices, so it allows
+W * H <= 1600. Linear only multiplies one row per step, so it allows
+W * H <= 2500.";
 
 struct Options {
     width: usize,
@@ -58,7 +58,7 @@ fn parse_args() -> Result<Options, String> {
         return Err("the maze needs at least 2 tiles".into());
     }
     let cap = match opts.method {
-        Method::Linear => 400,
+        Method::Linear => 2500,
         Method::Squaring => 1600,
     };
     if opts.width * opts.height > cap {

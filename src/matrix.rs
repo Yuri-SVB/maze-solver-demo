@@ -150,41 +150,44 @@ impl ReachabilityMatrix {
         self.rows.iter().map(|row| row.iter().zip(x).any(|(&r, &c)| r && c)).collect()
     }
 
-    /// Shortest path by computing every power `A^0, A^1, A^2, ...` in turn:
-    /// d matrix products and d stored matrices.
+    /// Shortest path by computing the powers `A^0, A^1, A^2, ...` one at a
+    /// time, keeping only row `a` of each: d row-vector products and d
+    /// stored rows of n entries.
     ///
-    /// 1. Compute `A^0, A^1, A^2, ...` until the first power with `[a][b]`
-    ///    set; that `d` is the shortest distance. Powers only ever gain
-    ///    entries. If one equals the previous power (it's idempotent) with
-    ///    `[a][b]` still false, nothing new can ever become reachable, so
-    ///    there's no path. This happens within `size` steps.
+    /// Row `a` of `A^s` is the set of vertices within `s` steps of `a`. It is
+    /// all the walk back ever reads, and the next one follows from it alone:
+    /// row `a` of `A^(s+1)` = (row `a` of `A^s`) * `A`.
+    ///
+    /// 1. Compute the rows until the first one with `b` set; that `s` is the
+    ///    shortest distance. Rows only ever gain entries. If one equals the
+    ///    previous row with `b` still unset, every later row is the same
+    ///    (each is the previous times `A`), so `b` is unreachable. This
+    ///    happens within `size` steps.
     /// 2. Walk backwards. If the current vertex is at distance `s + 1`, its
-    ///    predecessor is any `v` with `A[v][current]` and `A^s[a][v]` set:
+    ///    predecessor is any `v` with `A[v][current]` set and `v` in row `s`:
     ///    `v` is at most `s` steps from `a`, so exactly `s`. The current
-    ///    vertex itself never qualifies, because `A^s[a][current]` is false.
+    ///    vertex itself never qualifies, because it isn't in row `s`.
     pub fn shortest_path_linear(&self, a: usize, b: usize) -> Option<Vec<usize>> {
         assert!(a < self.size && b < self.size, "vertex out of range");
-        let mut powers = vec![Self::new(self.size)];
+        let mut rows = vec![unit(self.size, a)]; // rows[s] = row a of A^s
         loop {
-            let last = powers.last().expect("powers starts non-empty");
-            if last.get(a, b) {
+            let last = rows.last().expect("rows starts non-empty");
+            if last[b] {
                 break;
             }
-            // self is sparse, so multiply it on the left: the product skips
-            // the left operand's false entries.
-            let next = self * last;
+            let next = self.row_times(last);
             if &next == last {
                 return None;
             }
-            powers.push(next);
+            rows.push(next);
         }
 
-        let distance = powers.len() - 1;
+        let distance = rows.len() - 1;
         let mut path = vec![b];
         let mut current = b;
         for s in (0..distance).rev() {
             current = (0..self.size)
-                .find(|&v| powers[s].get(a, v) && self.get(v, current))
+                .find(|&v| rows[s][v] && self.get(v, current))
                 .expect("a vertex at distance s + 1 has a neighbour at distance s");
             path.push(current);
         }
@@ -196,7 +199,7 @@ impl ReachabilityMatrix {
 /// How `shortest_path` searches for the distance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Method {
-    /// `A^0, A^1, A^2, ...` one power at a time.
+    /// `A^0, A^1, A^2, ...` one power at a time, keeping only row `a`.
     Linear,
     /// `A, A^2, A^4, ...` by squaring, then bisection.
     Squaring,
