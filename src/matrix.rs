@@ -68,7 +68,90 @@ impl ReachabilityMatrix {
     }
 
     /// Shortest path from `a` to `b` as a list of vertices (both ends
-    /// included), or `None` if `b` is unreachable.
+    /// included), or `None` if `b` is unreachable. Uses repeated squaring.
+    pub fn shortest_path(&self, a: usize, b: usize) -> Option<Vec<usize>> {
+        self.shortest_path_with(a, b, Method::Squaring)
+    }
+
+    pub fn shortest_path_with(&self, a: usize, b: usize, method: Method) -> Option<Vec<usize>> {
+        match method {
+            Method::Linear => self.shortest_path_linear(a, b),
+            Method::Squaring => self.shortest_path_squaring(a, b),
+        }
+    }
+
+    /// Shortest path by repeated squaring: O(log d) matrix products instead of
+    /// d, and O(log d) stored matrices instead of d.
+    ///
+    /// 1. Square: `S_t = A^(2^t)`, so `S_0 = A`, `S_1 = A^2`, `S_2 = A^4`, ...
+    ///    Stop at the first `S_T` with `[a][b]` set: the distance `d` then
+    ///    satisfies `2^(T-1) < d <= 2^T`. If instead `S_t^2 == S_t`, the powers
+    ///    are idempotent (`S_t` is the full closure) with `[a][b]` false, so
+    ///    `b` is unreachable.
+    /// 2. Bisect (binary lifting): find the largest `s < 2^T` with
+    ///    `A^s[a][b]` false. Going through `t = T-1 .. 0`, try adding `2^t`
+    ///    to `s`, and keep it if `[a][b]` is still false. Only row `a` of
+    ///    `A^s` is needed, so each try is a row-vector product, O(n^2). Then
+    ///    `d = s + 1`.
+    /// 3. Rebuild the path by splitting at midpoints. For a path `u -> v` of
+    ///    length `k`, let `h` be the largest power of two below `k`. Any `m`
+    ///    with `A^h[u][m]` and `A^(k-h)[m][v]` is exactly `h` steps from `u`
+    ///    on some shortest path (otherwise `u -> v` would be shorter than
+    ///    `k`). Recurse on both halves.
+    pub fn shortest_path_squaring(&self, a: usize, b: usize) -> Option<Vec<usize>> {
+        assert!(a < self.size && b < self.size, "vertex out of range");
+        if a == b {
+            return Some(vec![a]);
+        }
+        let mut squares = vec![self.clone()];
+        loop {
+            let last = squares.last().expect("squares starts non-empty");
+            if last.get(a, b) {
+                break;
+            }
+            let next = last * last;
+            if &next == last {
+                return None;
+            }
+            squares.push(next);
+        }
+
+        let top = squares.len() - 1;
+        let mut row = unit(self.size, a); // row a of A^s
+        let mut s = 0;
+        for t in (0..top).rev() {
+            let candidate = squares[t].row_times(&row);
+            if !candidate[b] {
+                row = candidate;
+                s += 1 << t;
+            }
+        }
+
+        let mut path = vec![a];
+        extend_path(&squares, a, b, s + 1, &mut path);
+        Some(path)
+    }
+
+    /// `x * self` for a row vector `x`: the vertices reachable within the
+    /// matrix's step count from anything in `x`.
+    fn row_times(&self, x: &[bool]) -> Vec<bool> {
+        let mut out = vec![false; self.size];
+        for (k, _) in x.iter().enumerate().filter(|(_, &on)| on) {
+            for (o, &r) in out.iter_mut().zip(&self.rows[k]) {
+                *o |= r;
+            }
+        }
+        out
+    }
+
+    /// `self * x` for a column vector `x`: the vertices that reach something
+    /// in `x` within the matrix's step count.
+    fn times_column(&self, x: &[bool]) -> Vec<bool> {
+        self.rows.iter().map(|row| row.iter().zip(x).any(|(&r, &c)| r && c)).collect()
+    }
+
+    /// Shortest path by computing every power `A^0, A^1, A^2, ...` in turn:
+    /// d matrix products and d stored matrices.
     ///
     /// 1. Compute `A^0, A^1, A^2, ...` until the first power with `[a][b]`
     ///    set; that `d` is the shortest distance. Powers only ever gain
@@ -79,7 +162,7 @@ impl ReachabilityMatrix {
     ///    predecessor is any `v` with `A[v][current]` and `A^s[a][v]` set:
     ///    `v` is at most `s` steps from `a`, so exactly `s`. The current
     ///    vertex itself never qualifies, because `A^s[a][current]` is false.
-    pub fn shortest_path(&self, a: usize, b: usize) -> Option<Vec<usize>> {
+    pub fn shortest_path_linear(&self, a: usize, b: usize) -> Option<Vec<usize>> {
         assert!(a < self.size && b < self.size, "vertex out of range");
         let mut powers = vec![Self::new(self.size)];
         loop {
@@ -108,6 +191,55 @@ impl ReachabilityMatrix {
         path.reverse();
         Some(path)
     }
+}
+
+/// How `shortest_path` searches for the distance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Method {
+    /// `A^0, A^1, A^2, ...` one power at a time.
+    Linear,
+    /// `A, A^2, A^4, ...` by squaring, then bisection.
+    Squaring,
+}
+
+/// The unit row vector for vertex `i`: row `i` of `A^0`.
+fn unit(size: usize, i: usize) -> Vec<bool> {
+    let mut v = vec![false; size];
+    v[i] = true;
+    v
+}
+
+/// Append the vertices after `u` on a shortest path `u -> v` of length `k`,
+/// using `squares[t] = A^(2^t)`. Needs `k <= 2^(squares.len() - 1)`.
+fn extend_path(squares: &[ReachabilityMatrix], u: usize, v: usize, k: usize, path: &mut Vec<usize>) {
+    if k == 0 {
+        return;
+    }
+    if k == 1 {
+        path.push(v);
+        return;
+    }
+    let j = (usize::BITS - 1 - (k - 1).leading_zeros()) as usize; // h = 2^j, the largest power of two < k
+    let h = 1 << j;
+    let rest = k - h; // 1..=h
+    let reaches_v: Vec<bool> = if rest.is_power_of_two() {
+        let r = &squares[rest.trailing_zeros() as usize];
+        (0..r.size()).map(|m| r.get(m, v)).collect()
+    } else {
+        // Column v of A^rest: multiply the unit column through the squares for each bit of rest.
+        let mut col = unit(squares[0].size(), v);
+        for (t, square) in squares.iter().enumerate().take(j + 1) {
+            if rest & (1 << t) != 0 {
+                col = square.times_column(&col);
+            }
+        }
+        col
+    };
+    let m = (0..squares[j].size())
+        .find(|&m| squares[j].get(u, m) && reaches_v[m])
+        .expect("a shortest path has a vertex h steps in");
+    extend_path(squares, u, m, h, path);
+    extend_path(squares, m, v, rest, path);
 }
 
 /// Boolean matrix product: OR over k of (self[i][k] AND rhs[k][j]). The
@@ -209,6 +341,18 @@ mod tests {
             && path.windows(2).all(|w| w[0] != w[1] && m.get(w[0], w[1]))
     }
 
+    /// Solve with both methods: they must agree on the distance and both
+    /// return valid paths. Returns the squaring result.
+    fn both(m: &ReachabilityMatrix, a: usize, b: usize) -> Option<Vec<usize>> {
+        let linear = m.shortest_path_with(a, b, Method::Linear);
+        let squaring = m.shortest_path_with(a, b, Method::Squaring);
+        assert_eq!(linear.as_ref().map(Vec::len), squaring.as_ref().map(Vec::len), "{a} -> {b}\n{m}");
+        for path in [&linear, &squaring].into_iter().flatten() {
+            assert!(is_path(m, path, a, b), "bad path {path:?}\n{m}");
+        }
+        squaring
+    }
+
     #[test]
     fn new_is_the_identity() {
         let m = ReachabilityMatrix::new(3);
@@ -253,17 +397,17 @@ mod tests {
     #[test]
     fn shortest_path_on_a_line() {
         let a = graph(5, &[(0, 1), (1, 2), (2, 3), (3, 4)]);
-        assert_eq!(a.shortest_path(0, 4), Some(vec![0, 1, 2, 3, 4]));
-        assert_eq!(a.shortest_path(3, 1), Some(vec![3, 2, 1]));
-        assert_eq!(a.shortest_path(2, 2), Some(vec![2]));
+        assert_eq!(both(&a, 0, 4), Some(vec![0, 1, 2, 3, 4]));
+        assert_eq!(both(&a, 3, 1), Some(vec![3, 2, 1]));
+        assert_eq!(both(&a, 2, 2), Some(vec![2]));
     }
 
     #[test]
     fn even_cycle_and_isolated_vertex() {
         // A 4-cycle is bipartite: exact-step powers would alternate forever.
         let a = graph(5, &[(0, 1), (1, 2), (2, 3), (3, 0)]);
-        assert_eq!(a.shortest_path(0, 2).map(|p| p.len()), Some(3));
-        assert_eq!(a.shortest_path(0, 4), None); // vertex 4 is isolated
+        assert_eq!(both(&a, 0, 2).map(|p| p.len()), Some(3));
+        assert_eq!(both(&a, 0, 4), None); // vertex 4 is isolated
     }
 
     #[test]
@@ -271,15 +415,29 @@ mod tests {
         let mut a = ReachabilityMatrix::new(3);
         a.set(0, 1, true);
         a.set(1, 2, true);
-        assert_eq!(a.shortest_path(0, 2), Some(vec![0, 1, 2]));
-        assert_eq!(a.shortest_path(2, 0), None);
+        assert_eq!(both(&a, 0, 2), Some(vec![0, 1, 2]));
+        assert_eq!(both(&a, 2, 0), None);
     }
 
     #[test]
     fn takes_the_shortcut() {
         // Long way 0-1-2-3-4-5, shortcut 0-6-5.
         let a = graph(7, &[(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (0, 6), (6, 5)]);
-        assert_eq!(a.shortest_path(0, 5), Some(vec![0, 6, 5]));
+        assert_eq!(both(&a, 0, 5), Some(vec![0, 6, 5]));
+    }
+
+    #[test]
+    fn long_line_every_pair() {
+        // Distances up to 39 exercise every bit pattern in the bisection.
+        let n = 40;
+        let edges: Vec<(usize, usize)> = (0..n - 1).map(|i| (i, i + 1)).collect();
+        let a = graph(n, &edges);
+        for i in 0..n {
+            for j in 0..n {
+                let expected: Vec<usize> = if i <= j { (i..=j).collect() } else { (j..=i).rev().collect() };
+                assert_eq!(both(&a, i, j), Some(expected));
+            }
+        }
     }
 
     #[test]
@@ -303,7 +461,7 @@ mod tests {
             }
             for a in 0..n {
                 for b in 0..n {
-                    let path = m.shortest_path(a, b);
+                    let path = both(&m, a, b);
                     assert_eq!(path.as_ref().map(|p| p.len() - 1), bfs_distance(&m, a, b), "{a} -> {b}\n{m}");
                     if let Some(p) = path {
                         assert!(is_path(&m, &p, a, b), "bad path {p:?}\n{m}");

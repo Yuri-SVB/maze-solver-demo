@@ -4,7 +4,7 @@
 //! Tiles are numbered row by row: tile `(x, y)` has index `y * width + x`,
 //! with `(0, 0)` at the top left and `y` growing downwards.
 
-use crate::matrix::ReachabilityMatrix;
+use crate::matrix::{Method, ReachabilityMatrix};
 use crate::rng::Rng;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -142,7 +142,17 @@ impl Lattice {
 
     /// Shortest path between two tiles, as tile coordinates.
     pub fn shortest_path(&self, from: (usize, usize), to: (usize, usize)) -> Option<Vec<(usize, usize)>> {
-        let path = self.reachability().shortest_path(self.index(from.0, from.1), self.index(to.0, to.1))?;
+        self.shortest_path_with(from, to, Method::Squaring)
+    }
+
+    pub fn shortest_path_with(
+        &self,
+        from: (usize, usize),
+        to: (usize, usize),
+        method: Method,
+    ) -> Option<Vec<(usize, usize)>> {
+        let (a, b) = (self.index(from.0, from.1), self.index(to.0, to.1));
+        let path = self.reachability().shortest_path_with(a, b, method)?;
         Some(path.into_iter().map(|i| self.coords(i)).collect())
     }
 

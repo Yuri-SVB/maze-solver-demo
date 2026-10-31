@@ -6,5 +6,5 @@ pub mod matrix;
 pub mod rng;
 
 pub use lattice::{Direction, Lattice};
-pub use matrix::ReachabilityMatrix;
+pub use matrix::{Method, ReachabilityMatrix};
 pub use rng::Rng;
