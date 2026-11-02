@@ -50,8 +50,10 @@ There are two searches, chosen with `Method` (`--method` in the CLI).
    `S_(t+1) = S_t * S_t`, and keep each one.
    - Stop at the first `S_T` with `[a][b]` set. The distance `d` then
      satisfies `2^(T-1) < d <= 2^T`.
-   - If `S_t * S_t == S_t` while `[a][b]` is unset, `S_t` is the full
-     closure (idempotent), so `b` is unreachable.
+   - If row `a` of `S_t * S_t` equals row `a` of `S_t` while `[a][b]` is
+     unset, `a`'s reachable set is complete, so `b` is unreachable. Only row
+     `a` is compared: it settles as soon as `a`'s component is covered, often
+     several squarings before the whole matrix becomes idempotent.
 2. **Bisect (binary lifting).** Find the largest `s < 2^T` with `A^s[a][b]`
    false. For `t = T-1 down to 0`, try `s + 2^t` and keep it if `[a][b]` is
    still false. Only row `a` of `A^s` is ever needed, so each try is a

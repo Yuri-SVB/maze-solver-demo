@@ -85,9 +85,12 @@ impl ReachabilityMatrix {
     ///
     /// 1. Square: `S_t = A^(2^t)`, so `S_0 = A`, `S_1 = A^2`, `S_2 = A^4`, ...
     ///    Stop at the first `S_T` with `[a][b]` set: the distance `d` then
-    ///    satisfies `2^(T-1) < d <= 2^T`. If instead `S_t^2 == S_t`, the powers
-    ///    are idempotent (`S_t` is the full closure) with `[a][b]` false, so
-    ///    `b` is unreachable.
+    ///    satisfies `2^(T-1) < d <= 2^T`. If instead row `a` of `S_t^2` equals
+    ///    row `a` of `S_t` with `[a][b]` false, `b` is unreachable: rows only
+    ///    gain entries, so row `a` of every `A^k` with `2^t <= k <= 2^(t+1)`
+    ///    is the same, and each later row is the previous one times `A`.
+    ///    This stops as soon as `a`'s reachable set is complete, often several
+    ///    squarings before the whole matrix becomes idempotent.
     /// 2. Bisect (binary lifting): find the largest `s < 2^T` with
     ///    `A^s[a][b]` false. Going through `t = T-1 .. 0`, try adding `2^t`
     ///    to `s`, and keep it if `[a][b]` is still false. Only row `a` of
@@ -110,7 +113,7 @@ impl ReachabilityMatrix {
                 break;
             }
             let next = last * last;
-            if &next == last {
+            if next.rows[a] == last.rows[a] {
                 return None;
             }
             squares.push(next);
